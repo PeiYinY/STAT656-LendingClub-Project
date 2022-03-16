@@ -18,6 +18,22 @@ LCDataTB = read.csv('LoanStats3a.csv')
 LCDataTB <- LCDataTB %>% slice(-which(LCDataTB$loan_status == ""))
 ```
 
+
+###
+
+```{r}
+#Comment this here for important notes to remember - we need to do a different selection on the Y test
+Xtrain = select(LCDataTB, -loan_status)
+Xtest = select(LCDataTB, -loan_status)
+Ytrain = select(LCDataTB, loan_status) %>% unlist()
+Ytest = select(LCDataTW, loan_status) %>% unlist()
+table(Ytrain)
+
+LCDataTB %>% group_by(loan_status) %>% summarise(n = n())
+anyNA(LCDataTB$loan_status)
+#CARLOS
+```
+
 ###
 
 ```{r}
