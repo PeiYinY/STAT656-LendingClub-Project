@@ -6,8 +6,6 @@ output: html_document
 ---
 ### Reading in Data
 
-carlos here 
-
 ```{r readdata}
 library("tidyverse")
 rm(list=ls())# Just to clean up the memory again
