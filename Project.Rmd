@@ -1,0 +1,74 @@
+---
+title: "STAT656_LendingClubPJ"
+author: "Pei-Yin Yang"
+date: "2/17/2022"
+output: html_document
+---
+### Reading in Data
+
+```{r readdata}
+library("tidyverse")
+rm(list=ls())# Just to clean up the memory again
+LCData = read.csv('LoanStats3a.csv',header=TRUE,stringsAsFactors = FALSE)
+is.data.frame(LCData)
+LCDataTB = as_tibble(LCData) #convert it to tibble
+set.seed(1)
+LCDataTB = read.csv('LoanStats3a.csv')
+#names(LCDataTB)
+LCDataTB <- LCDataTB %>% slice(-which(LCDataTB$loan_status == ""))
+```
+
+###
+
+```{r}
+Xtrain = select(LCDataTB, -loan_status)
+Xtest = select(LCDataTB, -loan_status)
+Ytrain = select(LCDataTB, loan_status) %>% unlist()
+Ytest = select(LCDataTB, loan_status) %>% unlist()
+table(Ytrain)
+
+LCDataTB %>% group_by(loan_status) %>% summarise(n = n())
+anyNA(LCDataTB$loan_status)
+```
+
+
+### Preprocessing I (could be replaced by PCA?)
+
+```{r}
+library(caret)
+# Variability check
+# remove features that have minor variability
+LCDataTB <- LCDataTB %>% preProcess(method = 'nzv') %>%
+    predict(newdata = LCDataTB)
+
+#Center/scale for quantitative variables
+LCDataTB <- LCDataTB %>% preProcess(.) %>%
+    predict(newdata = LCDataTB)
+
+```
+
+### PCA analysis
+
+```{r}
+
+```
+
+
+### Missing data and Imputation
+
+```{r}
+#feature-wise deletion
+#remove features that contain more than 50% missing values
+LCDataTB <- LCDataTB[,!sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
+
+#Amputation
+
+
+```
+
+
+
+
+
+
+
