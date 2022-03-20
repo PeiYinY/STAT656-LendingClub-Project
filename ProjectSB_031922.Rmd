@@ -31,6 +31,7 @@ if (sum(rowsMissingStatus)>0){
 ```
 
 ### Preprocessing
+
 #### Checking loan status types
 
 ```{r}
@@ -74,8 +75,54 @@ LCDataTB = LCDataTB %>% select(where(~n_distinct(.) > 1))
 LCDataTB <- select(LCDataTB, -c(id,member_id,url,desc,zip_code,addr_state))
 #Deleting information not known at the time of origination for credit decision purposes (we can revisit this later)
 LCDataTB <- select(LCDataTB, -c(funded_amnt,funded_amnt_inv,total_pymnt,total_pymnt_inv,total_rec_int,total_rec_late_fee,recoveries,
-                                collection_recovery_fee,last_pymnt_d,last_pymnt_amnt,next_pymnt_d,last_credit_pull_d))
+                                collection_recovery_fee,last_pymnt_d,last_pymnt_amnt,next_pymnt_d,last_credit_pull_d,total_rec_prncp,
+                                issue_d))
+# Deleting pricing-related information already contained in other variables: the installment amount is already contained in the debt-to-income (DTI). The interest rate is needed for calculating the installment amount, but it is a result of the credit scoring, not a predictor.
+LCDataTB <- select(LCDataTB, -c(int_rate,installment))
+```
 
+#### Mutating Non-uniform Categorical Features
+
+The objective is to check some of the fields with open text ('emp_title' and 'title') and summarizing them into something more compact. Another option is to do some text mining and discover more information from the text, but I suggest we look into this only if we have time after producing a minimum viable product. (comment by Sebastian)
+
+```{r}
+#Checking unique values
+(unique = LCDataTB %>% select(emp_title, title) %>% summarise_all(n_distinct))
+#Showing the number of replication for each unique value, ordered in descending order
+LCDataTB %>% group_by(emp_title) %>% summarise(n = n()) %>% arrange()
+LCDataTB %>% group_by(title) %>% summarise(n = n()) %>% arrange()
+#Deleting both features
+LCDataTB <- select(LCDataTB, -c(emp_title,title))
+```
+'emp_title' and 'title' have `r unique$emp_title` and `r unique$title` unique values, respectively. Therefore, there are very few replications for each value. After confirming the frequency of unique values is very low, it makes sense to delete these features for now.
+
+#### Checking variable types and content II
+
+Now that we reduced the number features, it is easier to check that numeric and categorical features are appropriately classified
+
+```{r}
+# Checking data types
+table(sapply(LCDataTB[1,],class))
+# Checking if there are integers classified as numeric
+str(LCDataTB)
+```
+
+#### Converting to the appropriate data type
+
+The data dictionary helped identify misclassified data types.
+The following integer features should be numeric: loan_amt, revol_bal, total_acc
+The following character features should be numeric: revol_util, earliest_cr_line (this is a date)
+The following integer features should be factors: These are up for debate because most are count data (e.g., delinq_2yrs). I think we can encode anything that has 4 or more unique counts as numeric and anything else as factors. (comment by Sebastian).
+All other character features would be converted to factors. 
+
+```{r}
+LCDataTB %>% select(delinq_2yrs,inq_last_6mths,pub_rec,total_acc,collections_12_mths_ex_med,
+                    acc_now_delinq,chargeoff_within_12_mths,delinq_amnt,pub_rec_bankruptcies,
+                    tax_liens) %>% summarise_all(n_distinct)
+#TODO: Convert features to the appropriate categories
+#TODO: Carve-out and encode the supervisor
+#TODO: Impute missing values
+#TODO: Split features into factors and numeric in order to apply transformations (center and scale, Box-Cox, etc.) to numeric features
 ```
 
 ### Preprocessing I (could be replaced by PCA?)
