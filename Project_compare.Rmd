@@ -1,0 +1,177 @@
+---
+title: "STAT656_LendingClubPJ"
+author: "Pei-Yin Yang, Monica Daniel, Sebastian Bravo Sanchez"
+date: "2/17/2022"
+output: html_document
+---
+### Reading in Data and Loaging Libraries
+#### Loading Libraries
+
+```{r importlibs}
+packs = c('caret','corrplot', 'e1071','readr', 'tidyverse')
+lapply(packs,require,character.only=TRUE)
+```
+
+#### Loading Data*
+
+*I removed rows 39788 and 39789 from the LoanStats3a.csv file because they were blank except for the indication the the subsequent rows were for loans granted out of policy. I also created a new column called 'meets_policy' that takes value of 'Yes' for the loans that meet the policy (first 39786) and 'No' for the ones that don't (comment by Sebastian).
+
+```{r readdata}
+LCData = read.csv('LoanStatsEdited.csv',header=TRUE,stringsAsFactors = FALSE)
+is.data.frame(LCData)
+LCDataTB = as_tibble(LCData) #convert it to tibble
+set.seed(1)
+rowsMissingStatus = -which(LCDataTB$loan_status == "")
+
+#created if statement because there were zero missing rows after I edited the csv file
+if (sum(rowsMissingStatus)>0){
+  LCDataTB <- LCDataTB %>% slice(-which(LCDataTB$loan_status == ""))
+}
+
+```
+
+### Preprocessing
+
+#### Checking loan status types
+
+```{r}
+#Loan Statuses check
+LCDataTB %>% group_by(loan_status) %>% summarise(n = n())
+anyNA(LCDataTB$loan_status)
+```
+
+#### Cleaning and subsetting supervisor (Loan Status)
+
+```{r}
+#Rename loan status rows and remove rows where loan status is not of interest
+LCDataTB = LCDataTB %>% mutate(loan_status = replace(loan_status, loan_status == "Does not meet the credit policy. Status:Charged Off", "Charged Off")) %>% mutate(loan_status = replace(loan_status, loan_status == "Does not meet the credit policy. Status:Fully Paid", "Fully Paid"))
+LCDataTB = LCDataTB %>% filter(loan_status == 'Charged Off' | loan_status == 'Fully Paid')
+LCDataTB %>% group_by(loan_status) %>% summarise(n = n())
+```
+#### Checking variable types and content
+
+```{r}
+# Checking data types
+table(sapply(LCDataTB[1,],class))
+# Checking if there are integers classified as numeric
+str(LCDataTB)
+```
+
+#### Deleting Unecessary Variables
+Deletion based on the following:
+ - a) Features with greater than 50% missing data
+ - b) Categorical features with just one category
+ - c) Business knowledge from analyzing the Data Dictionary. 
+ 
+ Note: We can discuss a) and c) (by Sebastian)
+
+```{r}
+# remove features that contain more than 50% missing values
+LCDataTB <- LCDataTB[,!sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
+# remove categorical features with only one category
+LCDataTB = LCDataTB %>% select(where(~n_distinct(.) > 1))
+# Deleting meaningless features that refer to the individual and personal information that is restricted to avoid discrimination:
+# Sex, race and ethnicity, zip code (proxy for classes of people), etc.
+LCDataTB <- select(LCDataTB, -c(id,member_id,url,desc,zip_code,addr_state))
+#Deleting information not known at the time of origination for credit decision purposes (we can revisit this later)
+LCDataTB <- select(LCDataTB, -c(funded_amnt,funded_amnt_inv,total_pymnt,total_pymnt_inv,total_rec_int,total_rec_late_fee,recoveries,
+                                collection_recovery_fee,last_pymnt_d,last_pymnt_amnt,next_pymnt_d,last_credit_pull_d,total_rec_prncp,
+                                issue_d))
+# Deleting pricing-related information already contained in other variables: the installment amount is already contained in the debt-to-income (DTI). The interest rate is needed for calculating the installment amount, but it is a result of the credit scoring, not a predictor.
+LCDataTB <- select(LCDataTB, -c(int_rate,installment))
+```
+
+#### Mutating Non-uniform Categorical Features
+
+The objective is to check some of the fields with open text ('emp_title' and 'title') and summarizing them into something more compact. Another option is to do some text mining and discover more information from the text, but I suggest we look into this only if we have time after producing a minimum viable product. (comment by Sebastian)
+
+```{r}
+#Checking unique values
+(unique = LCDataTB %>% select(emp_title, title) %>% summarise_all(n_distinct))
+#Showing the number of replication for each unique value, ordered in descending order
+LCDataTB %>% group_by(emp_title) %>% summarise(n = n()) %>% arrange()
+LCDataTB %>% group_by(title) %>% summarise(n = n()) %>% arrange()
+#Deleting both features
+LCDataTB <- select(LCDataTB, -c(emp_title,title))
+```
+'emp_title' and 'title' have `r unique$emp_title` and `r unique$title` unique values, respectively. Therefore, there are very few replications for each value. After confirming the frequency of unique values is very low, it makes sense to delete these features for now.
+
+#### Checking variable types and content II
+
+Now that we reduced the number features, it is easier to check that numeric and categorical features are appropriately classified
+
+```{r}
+# Checking data types
+table(sapply(LCDataTB[1,],class))
+# Checking if there are integers classified as numeric
+str(LCDataTB)
+```
+
+#### Converting to the appropriate data type
+
+The data dictionary helped identify misclassified data types.
+The following integer features should be numeric: loan_amt, revol_bal, total_acc
+The following character features should be numeric: revol_util, earliest_cr_line (this is a date)
+The following integer features should be factors: These are up for debate because most are count data (e.g., delinq_2yrs). I think we can encode anything that has 4 or more unique counts as numeric and anything else as factors. (comment by Sebastian).
+All other character features would be converted to factors. 
+
+```{r}
+LCDataTB %>% select(delinq_2yrs,inq_last_6mths,pub_rec,total_acc,collections_12_mths_ex_med,
+                    acc_now_delinq,chargeoff_within_12_mths,delinq_amnt,pub_rec_bankruptcies,
+                    tax_liens) %>% summarise_all(n_distinct)
+#TODO: Convert features to the appropriate categories
+#TODO: Carve-out and encode the supervisor
+#TODO: Impute missing values
+#TODO: Split features into factors and numeric in order to apply transformations (center and scale, Box-Cox, etc.) to numeric features
+```
+
+### Preprocessing I (could be replaced by PCA?)
+
+I'm not sure this code chunk should be applied to the entire dataset. In some examples I saw Darren first split categorical and numerical variables before applying pre-processing since not everything applies uniformly, e.g., it does not make sense to center / scale factors nor apply 'nzv'. (comment by Sebastian)
+
+```{r}
+library(caret)
+# Variability check
+# remove features that have minor variability
+LCDataTB <- LCDataTB %>% preProcess(method = 'nzv') %>%
+    predict(newdata = LCDataTB)
+
+#Center/scale for quantitative variables
+LCDataTB <- LCDataTB %>% preProcess(.) %>%
+    predict(newdata = LCDataTB)
+```
+
+### PCA analysis
+
+```{r}
+
+```
+
+
+### Missing data and Imputation
+
+```{r}
+#feature-wise deletion
+#remove features that contain more than 50% missing values
+LCDataTB <- LCDataTB[,!sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
+
+#Amputation
+
+
+```
+### Train and Test Split
+
+```{r}
+Xtrain = select(LCDataTB, -loan_status)
+Xtest = select(LCDataTB, -loan_status)
+Ytrain = select(LCDataTB, loan_status) %>% unlist()
+Ytest = select(LCDataTB, loan_status) %>% unlist()
+table(Ytrain)
+
+```
+
+
+
+
+
+
