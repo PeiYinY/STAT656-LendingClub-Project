@@ -232,7 +232,9 @@ LCDataTB <- LCDataTB[,!sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
 
 #Amputation
 
+
 ```
+
 
 ### Train and Test Split
 
