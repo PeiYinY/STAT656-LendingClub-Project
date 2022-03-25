@@ -70,8 +70,6 @@ Deletion based on the following:
  
  Note: We can discuss a) and c) (by Sebastian)
 
-
-
 ```{r}
 # remove features that contain more than 50% missing values
 LCDataTB <- LCDataTB[, !sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
@@ -87,13 +85,13 @@ LCDataTB <- select(LCDataTB, -c(id,member_id,url,desc,zip_code,addr_state))
 LCDataTB <- select(LCDataTB, -c(int_rate,installment))
 
 # remove categorical features with only one category
-
 LCDataTB <-  LCDataTB %>% select(where(~n_distinct(.) > 1)) #(Sebastian)
 
-# TODO:one value + NA
+# TODO:Remove features that contain one unique value + NA
 names(LCDataTB[, sapply(LCDataTB, function(col) length(unique(col))) == 2])
 ## Remove "collections_12_mths_ex_med" & "chargeoff_within_12_mths" because they have only one unique value and NA
-LCDataTB <- select(LCDataTB, -c(collections_12_mths_ex_med,chargeoff_within_12_mths))
+LCDataTB <- LCDataTB %>%
+  select(-c(collections_12_mths_ex_med,chargeoff_within_12_mths))
 
 ```
 
@@ -114,6 +112,14 @@ LCDataTB <- LCDataTB %>% select(-c(emp_title,title))
 
 #### Dictionary Check for feature selection
 
+Pei:
+sub_grade is contained in grade; 
+open_acc is contained in total_acc
+
+Should we remove from one of each?
+
+Difference between Pei and Seb: earliest_cr_line
+
 ```{r}
 #Dictionary <- read_excel("LCDataDictionary.xlsx")
 #Dictionary <- Dictionary %>% filter(LoanStatNew %in%  colnames(LCDataTB))
@@ -128,18 +134,7 @@ LCDataTB <- select(LCDataTB, -c(funded_amnt, funded_amnt_inv, total_pymnt,
                                 collection_recovery_fee, 
                                 last_pymnt_d, last_pymnt_amnt, 
                                 next_pymnt_d, last_credit_pull_d, 
-                                total_rec_prncp, issue_d,
-                                earliest_cr_line))
-#Pei <- c(collection_recovery_fee, recoveries,
-         #earliest_cr_line, funded_amnt_inv, installment,
-         #int_rate, issue_d,last_credit_pull_d,
-         #last_pymnt_amnt,last_pymnt_d,
-         #next_pymnt_d,total_pymnt,
-         #total_pymnt_inv,total_rec_int
-         #,total_rec_late_fee
-         #,total_rec_prncp)
-
-##Difference between Pei and Seb: earliest_cr_line 
+                                total_rec_prncp, issue_d))
 ```
 
 
@@ -152,6 +147,8 @@ Now that we reduced the number features, it is easier to check that numeric and 
 table(sapply(LCDataTB[1,],class))
 # Checking if there are integers classified as numeric
 str(LCDataTB)
+# Checking the number of unique values in each column
+sapply(LCDataTB, function(col) length(unique(col)))
 ```
 
 #### Converting to the appropriate data type
@@ -168,15 +165,36 @@ I think we can encode anything that has 4 or more unique counts as numeric and a
 All other character features would be converted to factors. 
 
 ```{r}
-LCDataTB %>% select(delinq_2yrs,inq_last_6mths,pub_rec,
-                    total_acc,chargeoff_within_12_mths,
-                    delinq_amnt,pub_rec_bankruptcies, tax_liens) %>%
+LCDataTB %>% select(delinq_2yrs,inq_last_6mths,
+                    pub_rec,total_acc,delinq_amnt,
+                    pub_rec_bankruptcies, tax_liens) %>%
     summarise_all(n_distinct)
 #TODO: Convert features to the appropriate categories
 #TODO: Carve-out and encode the supervisor
 #TODO: Impute missing values
 #TODO: Split features into factors and numeric in order to apply transformations (center and scale, Box-Cox, etc.) to numeric features
 
+## Step 1: Convert chr and integer with less than 4 levels into factor
+Chr_fac <- c("emp_length", "grade", "home_ownership",
+             "loan_status","purpose","pymnt_plan",
+             "sub_grade","term","verification_status", "meets_policy")
+Int_fac <- c("acc_now_delinq", "tax_liens")
+variableFactor <- c(Chr_fac, Int_fac)
+LCDataFactor <- mutate_at(LCDataTB, variableFactor, as.factor)
+
+## Step 2: Make a new object for now that just has the quantitative features, converting integer type to numeric
+#TODO:convert earliest_cr_line into numeric
+LCDataQuant = LCDataFactor %>%
+  mutate(revol_util=parse_number(revol_util)/100) %>% #convert character of percentage into numeric
+  select(-any_of(variableFactor)) %>% 
+  mutate_all(as.numeric)
+
+## Combine the above two steps
+LCDataTB <- LCDataTB %>% 
+  mutate_at(variableFactor, as.factor) %>%
+  mutate(revol_util=parse_number(revol_util)/100) %>% 
+  select(-any_of(variableFactor)) %>% 
+  mutate_all(as.numeric)
 
 # Remove features that have close to zero variance
 # Use it once we confirm the variable type
@@ -214,9 +232,7 @@ LCDataTB <- LCDataTB[,!sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
 
 #Amputation
 
-
 ```
-
 
 ### Train and Test Split
 
@@ -228,8 +244,3 @@ Ytest = select(LCDataTB, loan_status) %>% unlist()
 table(Ytrain)
 
 ```
-
-
-
-
-
