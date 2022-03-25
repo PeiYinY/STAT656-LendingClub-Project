@@ -18,18 +18,17 @@ lapply(packs,require,character.only=TRUE)
 *I removed rows 39788 and 39789 from the LoanStats3a.csv file because they were blank except for the indication the the subsequent rows were for loans granted out of policy. I also created a new column called 'meets_policy' that takes value of 'Yes' for the loans that meet the policy (first 39786) and 'No' for the ones that don't (comment by Sebastian).
 
 ```{r readdata}
-LCData <-  read.csv('LoanStats3a.csv',header=TRUE,stringsAsFactors = FALSE)
+LCData <-  read.csv('LoanStatsEdited.csv',header=TRUE,stringsAsFactors = FALSE)
 is.data.frame(LCData)
 LCDataTB <-  as_tibble(LCData) #convert it to tibble
 set.seed(1)
 rowsMissingStatus <-  -which(LCDataTB$loan_status == "")
-LCDataTB <- LCDataTB %>% slice(rowsMissingStatus)
+#LCDataTB <- LCDataTB %>% slice(rowsMissingStatus)
 
 #created if statement because there were zero missing rows after I edited the csv file
-if (sum(rowsMissingStatus)>0){
+if (length(rowsMissingStatus)>0){
   LCDataTB <- LCDataTB %>% slice(-which(LCDataTB$loan_status == ""))
 }
-
 ```
 
 ### Preprocessing
@@ -71,8 +70,7 @@ Deletion based on the following:
  
  Note: We can discuss a) and c) (by Sebastian)
 
-Note: (by Pei)
- - would annual_inc, zipcode measure the same underlying phenomenon?
+
 
 ```{r}
 # remove features that contain more than 50% missing values
@@ -80,24 +78,23 @@ LCDataTB <- LCDataTB[, !sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
 
 # Deleting meaningless features that refer to the individual and personal information that is restricted to avoid discrimination:
 # Sex, race and ethnicity, zip code (proxy for classes of people), etc.
+#TODO: addr_state
+# addr_state may not influence the outcome interest? (Pei)
+# zip_code maybe a proxy of status, if using for any type of decision making, can lead to a serious discrimination suit (Pei)
 LCDataTB <- select(LCDataTB, -c(id,member_id,url,desc,zip_code,addr_state))
-#Deleting information not known at the time of origination for credit decision purposes (we can revisit this later)
-LCDataTB <- select(LCDataTB, -c(funded_amnt, funded_amnt_inv, total_pymnt, 
-                                total_pymnt_inv, total_rec_int, 
-                                total_rec_late_fee, recoveries, 
-                                collection_recovery_fee, 
-                                last_pymnt_d, last_pymnt_amnt, 
-                                next_pymnt_d, last_credit_pull_d, 
-                                total_rec_prncp, issue_d))
+
 # Deleting pricing-related information already contained in other variables: the installment amount is already contained in the debt-to-income (DTI). The interest rate is needed for calculating the installment amount, but it is a result of the credit scoring, not a predictor.
 LCDataTB <- select(LCDataTB, -c(int_rate,installment))
 
-
 # remove categorical features with only one category
-LCDataTB_Seb <-  LCDataTB %>% select(where(~n_distinct(.) > 1)) #(Sebastian)
 
-# Remove features that have close to zero variance
-LCDataTB_Pei <- LCDataTB[, -nearZeroVar(LCDataTB)] #(Pei)
+LCDataTB <-  LCDataTB %>% select(where(~n_distinct(.) > 1)) #(Sebastian)
+
+# TODO:one value + NA
+names(LCDataTB[, sapply(LCDataTB, function(col) length(unique(col))) == 2])
+## Remove "collections_12_mths_ex_med" & "chargeoff_within_12_mths" because they have only one unique value and NA
+LCDataTB <- select(LCDataTB, -c(collections_12_mths_ex_med,chargeoff_within_12_mths))
+
 ```
 
 #### Mutating Non-uniform Categorical Features
@@ -114,6 +111,37 @@ LCDataTB %>% group_by(title) %>% summarise(n = n()) %>% arrange()
 LCDataTB <- LCDataTB %>% select(-c(emp_title,title))
 ```
 'emp_title' and 'title' have `r unique$emp_title` and `r unique$title` unique values, respectively. Therefore, there are very few replications for each value. After confirming the frequency of unique values is very low, it makes sense to delete these features for now.
+
+#### Dictionary Check for feature selection
+
+```{r}
+#Dictionary <- read_excel("LCDataDictionary.xlsx")
+#Dictionary <- Dictionary %>% filter(LoanStatNew %in%  colnames(LCDataTB))
+#write_csv(Dictionary, file = "Dictionary_check.csv")
+
+#Deleting information not known at the time of origination for credit decision purposes (we can revisit this later)
+
+#TODO: check the dictionary
+LCDataTB <- select(LCDataTB, -c(funded_amnt, funded_amnt_inv, total_pymnt, 
+                                total_pymnt_inv, total_rec_int, 
+                                total_rec_late_fee, recoveries, 
+                                collection_recovery_fee, 
+                                last_pymnt_d, last_pymnt_amnt, 
+                                next_pymnt_d, last_credit_pull_d, 
+                                total_rec_prncp, issue_d,
+                                earliest_cr_line))
+#Pei <- c(collection_recovery_fee, recoveries,
+         #earliest_cr_line, funded_amnt_inv, installment,
+         #int_rate, issue_d,last_credit_pull_d,
+         #last_pymnt_amnt,last_pymnt_d,
+         #next_pymnt_d,total_pymnt,
+         #total_pymnt_inv,total_rec_int
+         #,total_rec_late_fee
+         #,total_rec_prncp)
+
+##Difference between Pei and Seb: earliest_cr_line 
+```
+
 
 #### Checking variable types and content II
 
@@ -141,14 +169,18 @@ All other character features would be converted to factors.
 
 ```{r}
 LCDataTB %>% select(delinq_2yrs,inq_last_6mths,pub_rec,
-                    total_acc,collections_12_mths_ex_med,
-                    acc_now_delinq,chargeoff_within_12_mths,
+                    total_acc,chargeoff_within_12_mths,
                     delinq_amnt,pub_rec_bankruptcies, tax_liens) %>%
     summarise_all(n_distinct)
 #TODO: Convert features to the appropriate categories
 #TODO: Carve-out and encode the supervisor
 #TODO: Impute missing values
 #TODO: Split features into factors and numeric in order to apply transformations (center and scale, Box-Cox, etc.) to numeric features
+
+
+# Remove features that have close to zero variance
+# Use it once we confirm the variable type
+LCDataTB <- LCDataTB[, -nearZeroVar(LCDataTB)] #(Pei)
 ```
 
 ### Preprocessing I (could be replaced by PCA?)
