@@ -9,7 +9,7 @@ output: html_document
 
 ```{r importlibs}
 packs = c('caret','corrplot', 'e1071','readr', 'tidyverse','RANN',
-          'AppliedPredictiveModeling')
+          'AppliedPredictiveModeling','stringr')
 lapply(packs,require,character.only=TRUE)
 ```
 
@@ -18,7 +18,8 @@ lapply(packs,require,character.only=TRUE)
 *I removed rows 39788 and 39789 from the LoanStats3a.csv file because they were blank except for the indication the the subsequent rows were for loans granted out of policy. I also created a new column called 'meets_policy' that takes value of 'Yes' for the loans that meet the policy (first 39786) and 'No' for the ones that don't (comment by Sebastian).
 
 ```{r readdata}
-LCData <-  read.csv('LoanStatsEdited.csv',header=TRUE,stringsAsFactors = FALSE)
+LCData <-  read.csv('LoanStatsEdited.csv',header=TRUE,stringsAsFactors = FALSE,
+                    na.strings=c("","NA"))
 is.data.frame(LCData)
 LCDataTB <-  as_tibble(LCData) #convert it to tibble
 set.seed(1)
@@ -79,10 +80,18 @@ LCDataTB <- LCDataTB[, !sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
 #TODO: addr_state
 # addr_state may not influence the outcome interest? (Pei)
 # zip_code maybe a proxy of status, if using for any type of decision making, can lead to a serious discrimination suit (Pei)
-LCDataTB <- select(LCDataTB, -c(id,member_id,url,desc,zip_code,addr_state))
+
+#LCDataTB <- select(LCDataTB, -c(id,member_id,url,desc,zip_code,addr_state))
+
+## Try not to remove id##
+LCDataTB <- select(LCDataTB, -c(member_id,url,desc,zip_code,addr_state))
 
 # Deleting pricing-related information already contained in other variables: the installment amount is already contained in the debt-to-income (DTI). The interest rate is needed for calculating the installment amount, but it is a result of the credit scoring, not a predictor.
 LCDataTB <- select(LCDataTB, -c(int_rate,installment))
+
+# Remove total_acc & grade
+LCDataTB <- select(LCDataTB, -c(total_acc,grade))
+
 
 # remove categorical features with only one category
 LCDataTB <-  LCDataTB %>% select(where(~n_distinct(.) > 1)) #(Sebastian)
@@ -118,8 +127,6 @@ open_acc is contained in total_acc
 
 Should we remove from one of each?
 
-Difference between Pei and Seb: earliest_cr_line
-
 ```{r}
 #Dictionary <- read_excel("LCDataDictionary.xlsx")
 #Dictionary <- Dictionary %>% filter(LoanStatNew %in%  colnames(LCDataTB))
@@ -132,8 +139,7 @@ LCDataTB <- select(LCDataTB, -c(funded_amnt, funded_amnt_inv, total_pymnt,
                                 total_pymnt_inv, total_rec_int, 
                                 total_rec_late_fee, recoveries, 
                                 collection_recovery_fee, 
-                                last_pymnt_d, last_pymnt_amnt, 
-                                next_pymnt_d, last_credit_pull_d, 
+                                last_pymnt_d, last_pymnt_amnt,last_credit_pull_d, 
                                 total_rec_prncp, issue_d))
 ```
 
@@ -166,7 +172,7 @@ All other character features would be converted to factors.
 
 ```{r}
 LCDataTB %>% select(delinq_2yrs,inq_last_6mths,
-                    pub_rec,total_acc,delinq_amnt,
+                    pub_rec,delinq_amnt,
                     pub_rec_bankruptcies, tax_liens) %>%
     summarise_all(n_distinct)
 #TODO: Convert features to the appropriate categories
@@ -175,30 +181,66 @@ LCDataTB %>% select(delinq_2yrs,inq_last_6mths,
 #TODO: Split features into factors and numeric in order to apply transformations (center and scale, Box-Cox, etc.) to numeric features
 
 ## Step 1: Convert chr and integer with less than 4 levels into factor
-Chr_fac <- c("emp_length", "grade", "home_ownership",
+Chr_fac <- c("emp_length", "home_ownership",
              "loan_status","purpose","pymnt_plan",
              "sub_grade","term","verification_status", "meets_policy")
 Int_fac <- c("acc_now_delinq", "tax_liens")
 variableFactor <- c(Chr_fac, Int_fac)
-LCDataFactor <- mutate_at(LCDataTB, variableFactor, as.factor)
+
+LCDataFactor <- LCDataTB %>%
+  select(any_of(variableFactor), earliest_cr_line, id) %>% 
+  mutate_all(as.factor)
+
+##############################Investigation purpose, can be removed, Don't run these
+# Work on earliest_cr_line (04/13/2022)
+#(1)Format: Month-Year: Jan-00
+L1 <- LCDataTB %>%
+    filter(str_detect(earliest_cr_line, c("^J|^F|^M|^A|^S|^O|^N|^D")))
+
+#(2)Format: Year-Month: 1-Jan
+L2 <- LCDataTB %>%
+    filter(str_detect(earliest_cr_line, 
+                      c("^1|^2|^3|^4|^5|^6|^7|^8|^9|^10|^11|^12|^13|^14|^15|^16|^17|^18|^19|^20")))
+#Since # of obs for L1+L2 is not equal to # of obs. for LCDataTB, investigate unmatched records
+Lcombine <- rbind.data.frame(L1,L2)
+Dif <- anti_join(LCDataTB, Lcombine, by = 'id') #turns out earliest_cr_line in 29 unmatched records are blank
+#############################Investigation purpose, can be removed, Don't run these
+
+# Work on earliest_cr_line (04/13/2022)
+## Real Conversion starts from here
+#(1)Format: Month-Year: Jan-00
+L1_factor <- LCDataFactor %>%
+    filter(str_detect(earliest_cr_line, c("^J|^F|^M|^A|^S|^O|^N|^D")))
+
+#(2)Format: Year-Month: 1-Jan
+L2_factor <- LCDataFactor %>%
+    filter(str_detect(earliest_cr_line, 
+                      c("^1|^2|^3|^4|^5|^6|^7|^8|^9|^10|^11|^12|^13|^14|^15|^16|^17|^18|^19|^20")))
+
+# Convert the format of earliest_cr_line to Date
+L1_factor$earliest_cr_line <- as.Date(sub("$","-01",L1_factor$earliest_cr_line), "%b-%y-%d") 
+L2_factor$earliest_cr_line <- as.Date(sub("^","01-",L2_factor$earliest_cr_line), "%d-%y-%b")
+Lcombine_factor <- bind_rows(L1_factor,L2_factor)
+Diff <- anti_join(LCDataFactor, Lcombine_factor, by = 'id')
+Diff$earliest_cr_line <- as.Date(Diff$earliest_cr_line)
+
+LCDataFactor1 <- bind_rows(L1_factor,L2_factor,Diff)
 
 ## Step 2: Make a new object for now that just has the quantitative features, converting integer type to numeric
-#TODO:convert earliest_cr_line into numeric
-LCDataQuant = LCDataFactor %>%
-  mutate(revol_util=parse_number(revol_util)/100) %>% #convert character of percentage into numeric
-  select(-any_of(variableFactor)) %>% 
+
+LCDataQuant = LCDataTB %>%
+  mutate(revol_util = parse_number(revol_util)/100) %>% #convert character of percentage into numeric
+  select(-any_of(variableFactor), -earliest_cr_line) %>% 
   mutate_all(as.numeric)
 
 ## Combine the above two steps
-LCDataTB <- LCDataTB %>% 
-  mutate_at(variableFactor, as.factor) %>%
-  mutate(revol_util=parse_number(revol_util)/100) %>% 
-  select(-any_of(variableFactor)) %>% 
-  mutate_all(as.numeric)
+LCDataFactor1$id <- as.numeric(levels(LCDataFactor1$id))[LCDataFactor1$id] #convert a factor to integer\numeric without loss of information
+LCDataTB <- left_join(LCDataQuant,LCDataFactor1, by = 'id')
+
 
 # Remove features that have close to zero variance
 # Use it once we confirm the variable type
-LCDataTB <- LCDataTB[, -nearZeroVar(LCDataTB)] #(Pei)
+LCDataTB_2 <- LCDataTB[, -nearZeroVar(LCDataTB)] #(Pei)
 ```
 
 ### Preprocessing I (could be replaced by PCA?)
@@ -208,12 +250,12 @@ I'm not sure this code chunk should be applied to the entire dataset. In some ex
 ```{r}
 # Variability check
 # remove features that have minor variability
-LCDataTB <- LCDataTB %>% preProcess(method = 'nzv') %>%
-    predict(newdata = LCDataTB)
+LCDataTB_2 <- LCDataTB_2 %>% preProcess(method = 'nzv') %>%
+    predict(newdata = LCDataTB_2)
 
 #Center/scale for quantitative variables
-LCDataTB <- LCDataTB %>% preProcess(.) %>%
-    predict(newdata = LCDataTB)
+LCDataTB_2 <- LCDataTB_2 %>% preProcess(.) %>%
+    predict(newdata = LCDataTB_2)
 ```
 
 ### PCA analysis
@@ -221,7 +263,6 @@ LCDataTB <- LCDataTB %>% preProcess(.) %>%
 ```{r}
 
 ```
-
 
 ### Missing data and Imputation
 
@@ -235,14 +276,13 @@ LCDataTB <- LCDataTB[,!sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
 
 ```
 
-
 ### Train and Test Split
 
 ```{r}
-Xtrain = select(LCDataTB, -loan_status)
-Xtest = select(LCDataTB, -loan_status)
-Ytrain = select(LCDataTB, loan_status) %>% unlist()
-Ytest = select(LCDataTB, loan_status) %>% unlist()
-table(Ytrain)
+#Xtrain = select(LCDataTB, -loan_status)
+#Xtest = select(LCDataTB, -loan_status)
+#Ytrain = select(LCDataTB, loan_status) %>% unlist()
+#Ytest = select(LCDataTB, loan_status) %>% unlist()
+#table(Ytrain)
 
 ```
