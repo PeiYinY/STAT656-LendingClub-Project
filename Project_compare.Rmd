@@ -87,10 +87,8 @@ LCDataTB <- LCDataTB[, !sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
 LCDataTB <- select(LCDataTB, -c(member_id,url,desc,zip_code,addr_state))
 
 # Deleting pricing-related information already contained in other variables: the installment amount is already contained in the debt-to-income (DTI). The interest rate is needed for calculating the installment amount, but it is a result of the credit scoring, not a predictor.
-LCDataTB <- select(LCDataTB, -c(int_rate,installment))
-
 # Remove total_acc & grade
-LCDataTB <- select(LCDataTB, -c(total_acc,grade))
+LCDataTB <- select(LCDataTB, -c(int_rate,installment,total_acc,grade))
 
 
 # remove categorical features with only one category
@@ -139,7 +137,8 @@ LCDataTB <- select(LCDataTB, -c(funded_amnt, funded_amnt_inv, total_pymnt,
                                 total_pymnt_inv, total_rec_int, 
                                 total_rec_late_fee, recoveries, 
                                 collection_recovery_fee, 
-                                last_pymnt_d, last_pymnt_amnt,last_credit_pull_d, 
+                                last_pymnt_d,
+                                last_pymnt_amnt,last_credit_pull_d, 
                                 total_rec_prncp, issue_d))
 ```
 
@@ -191,28 +190,12 @@ LCDataFactor <- LCDataTB %>%
   select(any_of(variableFactor), earliest_cr_line, id) %>% 
   mutate_all(as.factor)
 
-##############################Investigation purpose, can be removed, Don't run these
-# Work on earliest_cr_line (04/13/2022)
-#(1)Format: Month-Year: Jan-00
-L1 <- LCDataTB %>%
-    filter(str_detect(earliest_cr_line, c("^J|^F|^M|^A|^S|^O|^N|^D")))
-
-#(2)Format: Year-Month: 1-Jan
-L2 <- LCDataTB %>%
-    filter(str_detect(earliest_cr_line, 
-                      c("^1|^2|^3|^4|^5|^6|^7|^8|^9|^10|^11|^12|^13|^14|^15|^16|^17|^18|^19|^20")))
-#Since # of obs for L1+L2 is not equal to # of obs. for LCDataTB, investigate unmatched records
-Lcombine <- rbind.data.frame(L1,L2)
-Dif <- anti_join(LCDataTB, Lcombine, by = 'id') #turns out earliest_cr_line in 29 unmatched records are blank
-#############################Investigation purpose, can be removed, Don't run these
-
-# Work on earliest_cr_line (04/13/2022)
-## Real Conversion starts from here
-#(1)Format: Month-Year: Jan-00
+## Convert earliest_cr_line to numerical (04/13/2022)
+## Format(1): Month-Year: Jan-00
 L1_factor <- LCDataFactor %>%
     filter(str_detect(earliest_cr_line, c("^J|^F|^M|^A|^S|^O|^N|^D")))
 
-#(2)Format: Year-Month: 1-Jan
+## Format(2): Year-Month: 1-Jan
 L2_factor <- LCDataFactor %>%
     filter(str_detect(earliest_cr_line, 
                       c("^1|^2|^3|^4|^5|^6|^7|^8|^9|^10|^11|^12|^13|^14|^15|^16|^17|^18|^19|^20")))
@@ -233,14 +216,12 @@ LCDataQuant = LCDataTB %>%
   select(-any_of(variableFactor), -earliest_cr_line) %>% 
   mutate_all(as.numeric)
 
-## Combine the above two steps
+## Step 3: Combine the above two steps
 LCDataFactor1$id <- as.numeric(levels(LCDataFactor1$id))[LCDataFactor1$id] #convert a factor to integer\numeric without loss of information
 LCDataTB <- left_join(LCDataQuant,LCDataFactor1, by = 'id')
 
-
-# Remove features that have close to zero variance
-# Use it once we confirm the variable type
-LCDataTB_2 <- LCDataTB[, -nearZeroVar(LCDataTB)] #(Pei)
+## Remove features that have close to zero variance
+LCDataTB_2 <- LCDataTB[, -nearZeroVar(LCDataTB)]
 ```
 
 ### Preprocessing I (could be replaced by PCA?)
@@ -250,30 +231,38 @@ I'm not sure this code chunk should be applied to the entire dataset. In some ex
 ```{r}
 # Variability check
 # remove features that have minor variability
-LCDataTB_2 <- LCDataTB_2 %>% preProcess(method = 'nzv') %>%
+LCDataTB_3 <- LCDataTB_2 %>% preProcess(method = 'nzv') %>%
     predict(newdata = LCDataTB_2)
 
 #Center/scale for quantitative variables
-LCDataTB_2 <- LCDataTB_2 %>% preProcess(.) %>%
+LCDataTB_3 <- LCDataTB_2 %>% preProcess(.) %>%
     predict(newdata = LCDataTB_2)
-```
-
-### PCA analysis
-
-```{r}
-
 ```
 
 ### Missing data and Imputation
 
 ```{r}
-#feature-wise deletion
-#remove features that contain more than 50% missing values
-LCDataTB <- LCDataTB[,!sapply(LCDataTB, function(x) mean(is.na(x))) > 0.5]
+## KNN Imputation for quantitative features
+## The input for preProcess needs to be a data.frame
+LCMissingDataImpute = as.data.frame(LCDataTB_3) %>% 
+  preProcess(method='knnImpute') %>%
+  predict(newdata = LCDataTB_3)
 
-#Amputation
+## Find names of columns which contain missing values
+colnames(LCMissingDataImpute)[colSums(is.na(LCMissingDataImpute)) > 0]
 
+## Mode imputation for qualitative features
+modeImpute = function(Xqual){
+tbl = table(Xqual)
+Xqual[is.na(Xqual)] = names(tbl)[which.max(tbl)]
+return(Xqual)
+}
+LCMissingDataImpute = LCMissingDataImpute %>% 
+  mutate(earliest_cr_line = modeImpute(earliest_cr_line))
 
+anyNA(LCMissingDataImpute)
+
+## LCMissingDataImpute is the final dataset for building the model
 ```
 
 ### Train and Test Split
