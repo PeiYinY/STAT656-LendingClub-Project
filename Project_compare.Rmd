@@ -261,8 +261,17 @@ LCMissingDataImpute = LCMissingDataImpute %>%
   mutate(earliest_cr_line = modeImpute(earliest_cr_line))
 
 anyNA(LCMissingDataImpute)
+```
 
-## LCMissingDataImpute is the final dataset for building the model
+### Removing correlated variables
+
+```{r}
+## Visualization
+segDataQuantCombinedCorr = cor(LCMissingDataImpute %>% select_if(~class(.) == 'numeric'))
+corrplot(segDataQuantCombinedCorr, order = "hclust", tl.cex = .35)
+
+## There is no correlated variables
+## LCMissingDataImpute is the final data set for building the model
 ```
 
 ### Train and Test Split
